@@ -11,7 +11,7 @@ import { TabCounter } from "./components/TabCounter";
 import { SpeedometerChart } from "./components/SpeedometerChart";
 import { CSVUpload } from "./components/CSVUpload";
 import { getKPIDataByLocation, getAllKPIData, type KPIRecord } from "./utils/supabaseClient";
-import aryaHondaLogo from "C:\\Users\\ADMIN\\Desktop\\Final Try dashboard\\src\\assets\\Logo.png";
+import aryaHondaLogo from "./assets/Logo.png";
 
 // Default empty data structure - all data will come from database
 const emptyData: any[] = [];
