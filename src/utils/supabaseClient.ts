@@ -1,9 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = "https://edjzvyiukvsvfcwybkbn.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkanp2eWl1a3ZzdmZjd3lia2JuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc5MTM3MDgsImV4cCI6MjA3MzQ4OTcwOH0.iNRkt6wV9Zlw_CB3Ou9EHLIposY8455M1SmEccnohw4";
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // Database table structure for KPI data
 export interface KPIRecord {
