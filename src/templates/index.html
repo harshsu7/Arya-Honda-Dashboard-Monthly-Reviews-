@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="min-h-screen bg-gray-50 p-4">
+    <div class="max-w-7xl mx-auto space-y-4">
+        <!-- Header -->
+        <div class="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-6">
+                    <div class="h-16 w-16 bg-blue-600 rounded-lg flex items-center justify-center">
+                        <i data-lucide="car" class="h-8 w-8 text-white"></i>
+                    </div>
+                    <div class="flex-1">
+                        <div class="flex items-center justify-between mb-3">
+                            <h1 class="text-2xl font-semibold text-gray-900">Arya Honda Dashboard</h1>
+                            <div class="flex items-center space-x-3">
+                                <div class="flex items-center space-x-2">
+                                    <i data-lucide="map-pin" class="h-4 w-4 text-blue-600"></i>
+                                    <span class="text-sm text-gray-600">Location:</span>
+                                </div>
+                                <select id="location-select" class="select">
+                                    <option value="All Locations">All Locations</option>
+                                    {% for location in locations %}
+                                    <option value="{{ location }}">{{ location }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-4 text-gray-600 text-sm">
+                            <div class="flex items-center space-x-2">
+                                <i data-lucide="calendar-days" class="h-4 w-4"></i>
+                                <span id="current-date"></span>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <i data-lucide="settings" class="h-4 w-4"></i>
+                                <span id="location-info">ALL LOCATIONS Location</span>
+                                <div id="connection-status" class="badge badge-success text-xs">
+                                    Database Connected
+                                </div>
+                                <div id="records-count" class="badge badge-outline text-xs hidden">
+                                    0 Records
+                                </div>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <i data-lucide="car" class="h-4 w-4"></i>
+                                <span>Service Center KPIs</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-right ml-6">
+                    <div class="badge badge-primary">Monthly Review</div>
+                    <p class="text-xs text-gray-500 mt-1">Last Updated: <span id="last-updated"></span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Dashboard Navigation -->
+        <div class="tabs-container">
+            <div class="tabs-list">
+                <button class="tab-trigger active" data-tab="directors">
+                    <i data-lucide="pie-chart" class="h-4 w-4"></i>
+                    <span>Directors Overview</span>
+                </button>
+                <button class="tab-trigger" data-tab="dashboard">
+                    <i data-lucide="bar-chart-3" class="h-4 w-4"></i>
+                    <span>Detailed Dashboard</span>
+                    <div id="overview-counter" class="tab-counter">
+                        <span class="counter-achieved">0</span>
+                        <span class="counter-below">0</span>
+                        <span class="counter-action">0</span>
+                    </div>
+                </button>
+                <button class="tab-trigger" data-tab="upload">
+                    <i data-lucide="upload" class="h-4 w-4"></i>
+                    <span>Data Upload</span>
+                </button>
+            </div>
+
+            <!-- Directors Overview Tab -->
+            <div id="tab-directors" class="tab-content active space-y-4">
+                <!-- Regional Performance Summary -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i data-lucide="trending-up" class="h-5 w-5 text-green-600"></i>
+                            <span>Regional Performance Summary</span>
+                        </h3>
+                    </div>
+                    <div class="card-content">
+                        <div id="regional-summary" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <!-- Regional summary cards will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Location Performance Speedometers -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i data-lucide="pie-chart" class="h-5 w-5 text-blue-600"></i>
+                            <span>All Locations Performance Overview</span>
+                        </h3>
+                    </div>
+                    <div class="card-content">
+                        <!-- Throughput Performance -->
+                        <div class="mb-8">
+                            <h4 class="text-lg font-semibold text-gray-800 mb-4">Vehicle Throughput Achievement</h4>
+                            <div id="throughput-speedometers" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                                <!-- Speedometer charts will be populated by JavaScript -->
+                            </div>
+                        </div>
+
+                        <!-- Labour Performance -->
+                        <div class="mb-8">
+                            <h4 class="text-lg font-semibold text-gray-800 mb-4">Labour Revenue Achievement</h4>
+                            <div id="labour-speedometers" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                                <!-- Speedometer charts will be populated by JavaScript -->
+                            </div>
+                        </div>
+
+                        <!-- Parts Performance -->
+                        <div>
+                            <h4 class="text-lg font-semibold text-gray-800 mb-4">Parts Sales Achievement</h4>
+                            <div id="parts-speedometers" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                                <!-- Speedometer charts will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detailed Dashboard Tab -->
+            <div id="tab-dashboard" class="tab-content space-y-4">
+                <!-- Sub-navigation for detailed view -->
+                <div class="tabs-container">
+                    <div class="tabs-list">
+                        <button class="tab-trigger active" data-tab="overview">
+                            <i data-lucide="trending-up" class="h-4 w-4"></i>
+                            <span>Overview</span>
+                        </button>
+                        <button class="tab-trigger" data-tab="inflow">
+                            <i data-lucide="car" class="h-4 w-4"></i>
+                            <span>Inflow</span>
+                            <div id="inflow-counter" class="tab-counter">
+                                <span class="counter-achieved">0</span>
+                                <span class="counter-below">0</span>
+                                <span class="counter-action">0</span>
+                            </div>
+                        </button>
+                        <button class="tab-trigger" data-tab="labour">
+                            <i data-lucide="wrench" class="h-4 w-4"></i>
+                            <span>Labour</span>
+                            <div id="labour-counter" class="tab-counter">
+                                <span class="counter-achieved">0</span>
+                                <span class="counter-below">0</span>
+                                <span class="counter-action">0</span>
+                            </div>
+                        </button>
+                        <button class="tab-trigger" data-tab="parts">
+                            <i data-lucide="shopping-cart" class="h-4 w-4"></i>
+                            <span>Parts</span>
+                            <div id="parts-counter" class="tab-counter">
+                                <span class="counter-achieved">0</span>
+                                <span class="counter-below">0</span>
+                                <span class="counter-action">0</span>
+                            </div>
+                        </button>
+                        <button class="tab-trigger" data-tab="efficiency">
+                            <i data-lucide="cog" class="h-4 w-4"></i>
+                            <span>Efficiency</span>
+                            <div id="efficiency-counter" class="tab-counter">
+                                <span class="counter-achieved">0</span>
+                                <span class="counter-below">0</span>
+                                <span class="counter-action">0</span>
+                            </div>
+                        </button>
+                    </div>
+
+                    <!-- Overview Sub-tab -->
+                    <div id="sub-tab-overview" class="tab-content active space-y-4">
+                        <!-- Executive Summary -->
+                        <div id="executive-summary" class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">
+                                    <i data-lucide="trending-up" class="h-5 w-5 text-blue-600"></i>
+                                    <span>Executive Summary</span>
+                                </h3>
+                                <div class="flex items-center space-x-2 text-sm">
+                                    <div class="flex items-center space-x-1">
+                                        <div class="w-3 h-3 bg-green-500 rounded-full"></div>
+                                        <span class="text-green-700"><span id="summary-achieved">0</span> Achieved</span>
+                                    </div>
+                                    <div class="flex items-center space-x-1">
+                                        <div class="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                                        <span class="text-yellow-700"><span id="summary-below">0</span> Below Target</span>
+                                    </div>
+                                    <div class="flex items-center space-x-1">
+                                        <div class="w-3 h-3 bg-red-500 rounded-full"></div>
+                                        <span class="text-red-700"><span id="summary-action">0</span> Need Action</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-content">
+                                <div id="executive-summary-content" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <!-- Executive summary cards will be populated by JavaScript -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Key Performance Indicators -->
+                        <div id="kpi-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <!-- KPI cards will be populated by JavaScript -->
+                        </div>
+
+                        <!-- Performance Charts -->
+                        <div id="performance-chart-container" class="grid grid-cols-1 gap-4">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Target Achieved - All Locations (₹ in Lakhs)</h3>
+                                </div>
+                                <div class="card-content">
+                                    <canvas id="performance-chart" width="400" height="200"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Inflow Sub-tab -->
+                    <div id="sub-tab-inflow" class="tab-content space-y-4">
+                        <div id="inflow-section" class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Vehicle Inflow Metrics</h3>
+                            </div>
+                            <div class="card-content">
+                                <div id="inflow-content">
+                                    <!-- Inflow metrics will be populated by JavaScript -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Labour Sub-tab -->
+                    <div id="sub-tab-labour" class="tab-content space-y-4">
+                        <div id="labour-section" class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Labour Sale Performance (₹ Indian Rupees)</h3>
+                            </div>
+                            <div class="card-content">
+                                <div id="labour-content">
+                                    <!-- Labour metrics will be populated by JavaScript -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Parts Sub-tab -->
+                    <div id="sub-tab-parts" class="tab-content space-y-4">
+                        <div id="parts-section" class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Parts Sales & Products (₹ Indian Rupees)</h3>
+                            </div>
+                            <div class="card-content">
+                                <div id="parts-content">
+                                    <!-- Parts metrics will be populated by JavaScript -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Efficiency Sub-tab -->
+                    <div id="sub-tab-efficiency" class="tab-content space-y-4">
+                        <div id="efficiency-section" class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Efficiency & Other KPIs</h3>
+                            </div>
+                            <div class="card-content">
+                                <div id="efficiency-content">
+                                    <!-- Efficiency metrics will be populated by JavaScript -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Upload Tab -->
+            <div id="tab-upload" class="tab-content space-y-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i data-lucide="upload" class="h-5 w-5 text-blue-600"></i>
+                            <span>CSV Data Upload</span>
+                        </h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="max-w-2xl mx-auto">
+                            <!-- Upload Form -->
+                            <form id="upload-form" enctype="multipart/form-data" class="space-y-4">
+                                <div>
+                                    <label for="upload-location" class="block text-sm font-medium text-gray-700 mb-2">
+                                        Select Location
+                                    </label>
+                                    <select id="upload-location" name="location" class="select" required>
+                                        <option value="">Choose location...</option>
+                                        {% for location in locations %}
+                                        <option value="{{ location }}">{{ location }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="csv-file" class="block text-sm font-medium text-gray-700 mb-2">
+                                        Choose CSV File
+                                    </label>
+                                    <div id="file-drop-area" class="file-drop-area">
+                                        <input type="file" id="csv-file" name="file" accept=".csv" class="file-input" required>
+                                        <div class="file-drop-content">
+                                            <i data-lucide="upload-cloud" class="h-12 w-12 text-gray-400 mx-auto mb-4"></i>
+                                            <p class="text-lg text-gray-600 mb-2">Drop your CSV file here</p>
+                                            <p class="text-sm text-gray-500 mb-4">or click to browse</p>
+                                            <button type="button" class="btn btn-outline">Browse Files</button>
+                                        </div>
+                                        <div id="file-info" class="file-info hidden">
+                                            <i data-lucide="file-text" class="h-8 w-8 text-blue-600"></i>
+                                            <div>
+                                                <p id="file-name" class="font-medium text-gray-900"></p>
+                                                <p id="file-size" class="text-sm text-gray-500"></p>
+                                            </div>
+                                            <button type="button" id="remove-file" class="text-red-600 hover:text-red-700">
+                                                <i data-lucide="x" class="h-5 w-5"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <button type="submit" id="upload-btn" class="btn btn-primary w-full" disabled>
+                                    <i data-lucide="upload" class="h-4 w-4"></i>
+                                    Upload Data
+                                </button>
+                            </form>
+                            
+                            <!-- Upload Progress -->
+                            <div id="upload-progress" class="hidden mt-4">
+                                <div class="bg-gray-200 rounded-full h-2">
+                                    <div id="progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                                </div>
+                                <p id="progress-text" class="text-sm text-gray-600 mt-2">Uploading...</p>
+                            </div>
+                            
+                            <!-- Upload History -->
+                            <div class="mt-8">
+                                <h4 class="text-lg font-medium text-gray-900 mb-4">Upload History</h4>
+                                <div id="upload-history" class="space-y-2">
+                                    <!-- Upload history will be populated by JavaScript -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/upload.js') }}"></script>
+{% endblock %}
