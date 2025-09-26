@@ -710,7 +710,7 @@ export default function App() {
       <img
         src={aryaHondaLogo}
         alt="Arya Honda"
-        className="h-16 w-20 object-contain"
+        className="h-16 w-auto object-contain"
       />
 
     <div className="absolute left-1/2 transform -translate-x-1/2">
