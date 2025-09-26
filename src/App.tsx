@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Card,
   CardContent,
@@ -97,8 +97,16 @@ export default function App() {
 
       try {
         console.log("Loading all KPI data from database...");
-        const { data: allKpiData, error } =
-          await getAllKPIData();
+        
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Database query timeout')), 15000);
+        });
+
+        const { data: allKpiData, error } = await Promise.race([
+          getAllKPIData(),
+          timeoutPromise
+        ]) as { data: KPIRecord[] | null, error: any };
 
         if (error) {
           console.warn("Database connection issue:", error);
@@ -110,32 +118,62 @@ export default function App() {
           console.log(
             `Successfully loaded ${allKpiData.length} records from database`,
           );
+          
+          // Process data in smaller chunks to avoid blocking UI
           const allData: { [location: string]: CSVRow[] } = {};
+          const batchSize = 100;
+          
+          // Track unique locations found in database
+          const foundLocations = new Set<string>();
+          
+          for (let i = 0; i < allKpiData.length; i += batchSize) {
+            const batch = allKpiData.slice(i, i + batchSize);
+            
+            batch.forEach((record: KPIRecord) => {
+              // Normalize location name by trimming whitespace and ensuring consistent casing
+              const normalizedLocation = record.location.trim();
+              foundLocations.add(normalizedLocation);
+              
+              if (!allData[normalizedLocation]) {
+                allData[normalizedLocation] = [];
+              }
 
-          // Group data by location
-          allKpiData.forEach((record: KPIRecord) => {
-            if (!allData[record.location]) {
-              allData[record.location] = [];
+              const csvRow: CSVRow = {
+                Tags: record.tags,
+                Parameters: record.parameters,
+                "Monthly Target": record.monthly_target,
+                "Target MTD": record.target_mtd || 0,
+                "Actual As On Date": record.actual_as_on_date,
+                Shortfall: record.shortfall,
+                "% ACH": record.percentage_ach,
+                Location: normalizedLocation,
+              };
+
+              allData[normalizedLocation].push(csvRow);
+            });
+            
+            // Allow UI to update between batches
+            if (i + batchSize < allKpiData.length) {
+              await new Promise(resolve => setTimeout(resolve, 0));
             }
-
-            const csvRow: CSVRow = {
-              Tags: record.tags,
-              Parameters: record.parameters,
-              "Monthly Target": record.monthly_target,
-              "Target MTD": record.target_mtd,
-              "Actual As On Date": record.actual_as_on_date,
-              Shortfall: record.shortfall,
-              "% ACH": record.percentage_ach,
-              Location: record.location,
-            };
-
-            allData[record.location].push(csvRow);
-          });
+          }
 
           console.log(
             "Grouped data by locations:",
             Object.keys(allData),
           );
+          console.log(
+            "Locations found in database:",
+            Array.from(foundLocations),
+          );
+          console.log(
+            "Data counts per location:",
+            Object.entries(allData).map(([location, data]) => ({
+              location,
+              recordCount: data.length
+            }))
+          );
+          
           setAllLocationsData(allData);
           setUploadedData(allData);
           setDbConnectionStatus("connected");
@@ -239,30 +277,39 @@ export default function App() {
     return emptyData;
   };
 
-  // Get data for selected location or aggregate all locations
-  const getCurrentLocationData = () => {
+  // Memoized data processing for performance
+  const allLocationData = useMemo(() => {
+    console.log("Processing data for selected location:", selectedLocation);
+    console.log("Available locations in allLocationsData:", Object.keys(allLocationsData));
+    console.log("Available locations in uploadedData:", Object.keys(uploadedData));
+    
     if (selectedLocation === "All Locations") {
       // Aggregate data from all available locations in the database
       const aggregatedData: any[] = [];
-
-      // Use all available locations from database, not just predefined list
       const availableLocations = Object.keys(allLocationsData);
 
+      if (availableLocations.length === 0) return [];
+
       availableLocations.forEach((location) => {
-        const locationData = getLocationData(location);
+        const locationCSVData = allLocationsData[location] || uploadedData[location];
+        if (!locationCSVData || locationCSVData.length === 0) return;
+
+        const locationData = convertCSVToKPIData(locationCSVData);
         locationData.forEach((item) => {
+          if (!item || !item.name) return;
+          
           const existingItem = aggregatedData.find(
             (aggItem) => aggItem.name === item.name,
           );
           if (existingItem) {
-            existingItem.target += item.target;
-            existingItem.actual += item.actual;
-            existingItem.shortfall += item.shortfall;
+            existingItem.target += item.target || 0;
+            existingItem.actual += item.actual || 0;
+            existingItem.shortfall += item.shortfall || 0;
+            existingItem.targetMTD = (existingItem.targetMTD || 0) + (item.targetMTD || 0);
             // Recalculate achievement percentage
             existingItem.achievement =
               existingItem.target > 0
-                ? (existingItem.actual / existingItem.target) *
-                  100
+                ? (existingItem.actual / existingItem.target) * 100
                 : 0;
           } else {
             aggregatedData.push({ ...item });
@@ -270,88 +317,149 @@ export default function App() {
         });
       });
 
+      console.log("Aggregated data for All Locations:", aggregatedData.length, "items");
       return aggregatedData;
     } else {
-      return getLocationData(selectedLocation);
+      // Try to find the location data with exact match first
+      let locationCSVData = allLocationsData[selectedLocation] || uploadedData[selectedLocation];
+      
+      // If no exact match, try case-insensitive search
+      if (!locationCSVData || locationCSVData.length === 0) {
+        const availableLocations = Object.keys(allLocationsData);
+        const matchedLocation = availableLocations.find(loc => 
+          loc.toLowerCase() === selectedLocation.toLowerCase()
+        );
+        
+        if (matchedLocation) {
+          locationCSVData = allLocationsData[matchedLocation];
+          console.log(`Found location data using case-insensitive match: ${matchedLocation}`);
+        }
+      }
+      
+      if (locationCSVData && locationCSVData.length > 0) {
+        const convertedData = convertCSVToKPIData(locationCSVData);
+        console.log(`Data for ${selectedLocation}:`, convertedData.length, "items");
+        console.log("Sample data:", convertedData.slice(0, 3));
+        return convertedData;
+      } else {
+        console.log(`No data found for location: ${selectedLocation}`);
+        return [];
+      }
     }
-  };
+  }, [selectedLocation, allLocationsData, uploadedData]);
 
-  const allLocationData = getCurrentLocationData();
+  // Memoized filtered data by categories
+  const { currentInflowData, currentLabourData, currentPartsData, currentEfficiencyData } = useMemo(() => {
+    if (!allLocationData || allLocationData.length === 0) {
+      return {
+        currentInflowData: [],
+        currentLabourData: [],
+        currentPartsData: [],
+        currentEfficiencyData: []
+      };
+    }
 
-  // Filter data by categories based on the Tags field
-  const currentInflowData = allLocationData.filter(
-    (item) =>
-      item.name &&
-      (item.name.toLowerCase().includes("throughput") ||
-        item.name.toLowerCase().includes("inflow")),
-  );
-
-  const currentLabourData = allLocationData.filter(
-    (item) =>
-      item.name &&
-      (item.name.toLowerCase().includes("labour") ||
-        item.name.toLowerCase().includes("labor")),
-  );
-
-  const currentPartsData = allLocationData.filter(
-    (item) =>
-      item.name &&
-      (item.name.toLowerCase().includes("parts") ||
-        item.name.toLowerCase().includes("accessories") ||
-        item.name.toLowerCase().includes("oil")),
-  );
-
-  const currentEfficiencyData = allLocationData.filter(
-    (item) =>
-      item.name &&
-      (item.name.toLowerCase().includes("conversion") ||
-        item.name.toLowerCase().includes("efficiency") ||
-        item.name.toLowerCase().includes("cleaning") ||
-        item.name.toLowerCase().includes("service") ||
-        item.name.toLowerCase().includes("nps") ||
-        item.name.toLowerCase().includes("connect") ||
-        item.name.toLowerCase().includes("complaints") ||
-        item.name.toLowerCase().includes("alignment") ||
-        item.name.toLowerCase().includes("balancing") ||
-        item.name.toLowerCase().includes("pmc") ||
-        item.name.toLowerCase().includes("cash") ||
-        item.name.toLowerCase().includes("insurance")),
-  );
-
-  // Calculate overall metrics from database data
-  const totalThroughputMetrics = currentInflowData.find(
-    (item) =>
-      item.name &&
-      item.name.toLowerCase().includes("total throughput"),
-  );
-  const totalTargetThroughput =
-    totalThroughputMetrics?.target || 0;
-  const totalActualThroughput =
-    totalThroughputMetrics?.actual || 0;
-  const overallThroughputAchievement =
-    totalThroughputMetrics?.achievement || 0;
-
-  const totalLabourMetrics =
-    currentLabourData.find(
+    const inflowData = allLocationData.filter(
       (item) =>
-        item.name &&
-        (item.name.toLowerCase().includes("total labour ( pmgr+bp+vas+amc rendered)") ||
-         item.name.toLowerCase().includes("total pmgr +vas+amc rlabour"))
-    ) ||
-    currentLabourData.reduce(
-      (acc, item) => ({
-        target: acc.target + item.target,
-        actual: acc.actual + item.actual,
-      }),
-      { target: 0, actual: 0 },
+        item?.name &&
+        (item.name.toLowerCase().includes("throughput") ||
+          item.name.toLowerCase().includes("inflow")),
     );
 
-  const totalTargetLabour = totalLabourMetrics.target;
-  const totalActualLabour = totalLabourMetrics.actual;
-  const overallLabourAchievement =
-    totalTargetLabour > 0
-      ? (totalActualLabour / totalTargetLabour) * 100
-      : 0;
+    const labourData = allLocationData.filter(
+      (item) =>
+        item?.name &&
+        (item.name.toLowerCase().includes("labour") ||
+          item.name.toLowerCase().includes("labor")),
+    );
+
+    const partsData = allLocationData.filter(
+      (item) =>
+        item?.name &&
+        (item.name.toLowerCase().includes("parts") ||
+          item.name.toLowerCase().includes("accessories") ||
+          item.name.toLowerCase().includes("oil")),
+    );
+
+    const efficiencyData = allLocationData.filter(
+      (item) =>
+        item?.name &&
+        (item.name.toLowerCase().includes("conversion") ||
+          item.name.toLowerCase().includes("efficiency") ||
+          item.name.toLowerCase().includes("cleaning") ||
+          item.name.toLowerCase().includes("service") ||
+          item.name.toLowerCase().includes("nps") ||
+          item.name.toLowerCase().includes("connect") ||
+          item.name.toLowerCase().includes("complaints") ||
+          item.name.toLowerCase().includes("alignment") ||
+          item.name.toLowerCase().includes("balancing") ||
+          item.name.toLowerCase().includes("pmc") ||
+          item.name.toLowerCase().includes("cash") ||
+          item.name.toLowerCase().includes("insurance")),
+    );
+
+    return {
+      currentInflowData: inflowData,
+      currentLabourData: labourData,
+      currentPartsData: partsData,
+      currentEfficiencyData: efficiencyData
+    };
+  }, [allLocationData]);
+
+  // Memoized overall metrics calculations
+  const overallMetrics = useMemo(() => {
+    const totalThroughputMetrics = currentInflowData.find(
+      (item) =>
+        item?.name &&
+        item.name.toLowerCase().includes("total throughput"),
+    );
+    
+    const totalLabourMetrics =
+      currentLabourData.find(
+        (item) =>
+          item?.name &&
+          (item.name.toLowerCase().includes("total labour ( pmgr+bp+vas+amc rendered)") ||
+           item.name.toLowerCase().includes("total pmgr +vas+amc rlabour"))
+      ) ||
+      currentLabourData.reduce(
+        (acc, item) => ({
+          target: acc.target + (item.target || 0),
+          actual: acc.actual + (item.actual || 0),
+        }),
+        { target: 0, actual: 0 },
+      );
+
+    const totalTargetThroughput = totalThroughputMetrics?.target || 0;
+    const totalActualThroughput = totalThroughputMetrics?.actual || 0;
+    const overallThroughputAchievement = totalThroughputMetrics?.achievement || 0;
+
+    const totalTargetLabour = totalLabourMetrics?.target || 0;
+    const totalActualLabour = totalLabourMetrics?.actual || 0;
+    const overallLabourAchievement =
+      totalTargetLabour > 0
+        ? (totalActualLabour / totalTargetLabour) * 100
+        : 0;
+
+    return {
+      totalTargetThroughput,
+      totalActualThroughput,
+      overallThroughputAchievement,
+      totalTargetLabour,
+      totalActualLabour,
+      overallLabourAchievement
+    };
+  }, [currentInflowData, currentLabourData]);
+
+  const {
+    totalTargetThroughput,
+    totalActualThroughput,
+    overallThroughputAchievement,
+    totalTargetLabour,
+    totalActualLabour,
+    overallLabourAchievement
+  } = overallMetrics;
+
+
 
   // Helper function to calculate metric counts
   const calculateCounts = (data: any[]) => {
@@ -577,24 +685,36 @@ export default function App() {
     ...locationMetrics,
   ];
 
+  // Show loading state while data is being processed
+  if (isLoadingData) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-4 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard data...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-black-50 p-4">
+    <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-[1400px] mx-auto space-y-4">
-<div className="bg-white border border-black-200 rounded-lg p-6 shadow-sm">
+<div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
   <div className="flex items-center justify-between">
     {/* Left side: Logo + Titles */}
     <div className="flex items-center space-x-6">
       {/* Logo */}
       <div>
-     <div className="flex items-center space-x-8">
+      <div className="flex items-center space-x-4">
       <img
         src={aryaHondaLogo}
         alt="Arya Honda"
-        className="h-16 w-auto object-contain"
+        className="h-16 w-20 object-contain"
       />
- 
+
     <div className="absolute left-1/2 transform -translate-x-1/2">
-      <h1 className="text-2xl font-bold text-black-900">
+      <h1 className="text-2xl font-bold text-gray-900">
         Arya Honda Dashboard
       </h1>
     </div>
@@ -602,7 +722,7 @@ export default function App() {
 
 
         {/* Sub Header: Location + DB Status + Location Data */}
-        <h2 className="flex items-center space-x-3 text-black-700 text-base mt-2">
+        <h2 className="flex items-center space-x-3 text-gray-700 text-base mt-2">
           <MapPin className="h-4 w-4 text-blue-600" />
           <span>Location:</span>
           <Select value={selectedLocation} onValueChange={setSelectedLocation}>
@@ -611,11 +731,19 @@ export default function App() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="All Locations">All Locations</SelectItem>
-              {locations.map((location) => (
-                <SelectItem key={location} value={location}>
-                  {location}
-                </SelectItem>
-              ))}
+              {/* Use actual locations from database data */}
+              {Object.keys(allLocationsData).length > 0 ? 
+                Object.keys(allLocationsData).map((location) => (
+                  <SelectItem key={location} value={location}>
+                    {location}
+                  </SelectItem>
+                )) :
+                locations.map((location) => (
+                  <SelectItem key={location} value={location}>
+                    {location}
+                  </SelectItem>
+                ))
+              }
             </SelectContent>
           </Select>
 
@@ -631,18 +759,43 @@ export default function App() {
             </Badge>
           )}
           {!isLoadingData &&
-            selectedLocation !== "All Locations" &&
-            allLocationsData[selectedLocation] &&
-            allLocationsData[selectedLocation].length > 0 && (
-              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
-                {allLocationsData[selectedLocation].length} Records
-              </Badge>
-          )}
+            selectedLocation !== "All Locations" && (
+              (() => {
+                // Try to find the location data with exact match or case-insensitive search
+                let locationData = allLocationsData[selectedLocation];
+                if (!locationData || locationData.length === 0) {
+                  const availableLocations = Object.keys(allLocationsData);
+                  const matchedLocation = availableLocations.find(loc => 
+                    loc.toLowerCase() === selectedLocation.toLowerCase()
+                  );
+                  if (matchedLocation) {
+                    locationData = allLocationsData[matchedLocation];
+                  }
+                }
+                
+                return locationData && locationData.length > 0 ? (
+                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
+                    {locationData.length} Records
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 text-xs">
+                    No Data
+                  </Badge>
+                );
+              })()
+            )}
 
           {/* Selected Location Data */}
-          <span className="ml-2 text-sm text-black-600 font-medium">
+          <span className="ml-2 text-sm text-gray-600 font-medium">
             {selectedLocation.toUpperCase()} Data
           </span>
+          
+          {/* Debug info showing available locations */}
+          {Object.keys(allLocationsData).length > 0 && (
+            <Badge variant="outline" className="bg-gray-50 text-gray-600 border-gray-200 text-xs ml-2">
+              DB Locations: {Object.keys(allLocationsData).join(", ")}
+            </Badge>
+          )}
         </h2>
       </div>
     </div>
@@ -654,13 +807,13 @@ export default function App() {
       </Badge>
 
       {/* CalendarDays Row */}
-      <div className="flex items-center justify-end space-x-2 mt-2 text-black-600 text-sm">
+      <div className="flex items-center justify-end space-x-2 mt-2 text-gray-600 text-sm">
         <CalendarDays className="h-4 w-4" />
         <span>{currentDate}</span>
       </div>
 
       {/* Last Updated Row */}
-      <p className="text-xs text-black-500 mt-1">
+      <p className="text-xs text-gray-500 mt-1">
         Last Updated: {new Date().toLocaleTimeString()}
       </p>
     </div>
@@ -670,7 +823,7 @@ export default function App() {
 
         {/* Main Dashboard Navigation */}
         <Tabs defaultValue="directors" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3 bg-white border border-black-200 rounded-lg p-1">
+          <TabsList className="grid w-full grid-cols-3 bg-white border border-gray-200 rounded-lg p-1">
             <TabsTrigger
               value="directors"
               className="flex items-center space-x-2 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700"
@@ -702,9 +855,9 @@ export default function App() {
           {/* Directors Overview Tab */}
           <TabsContent value="directors" className="space-y-4">
             {/* Regional Performance Summary */}
-            <Card className="border-black-200 shadow-sm">
+            <Card className="border-gray-200 shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center space-x-2 text-black-900">
+                <CardTitle className="flex items-center space-x-2 text-gray-900">
                   <TrendingUp className="h-5 w-5 text-green-600" />
                   <span>Regional Performance Summary</span>
                 </CardTitle>
@@ -718,10 +871,10 @@ export default function App() {
                       )}
                       %
                     </p>
-                    <p className="text-sm text-black-600">
+                    <p className="text-sm text-gray-600">
                       Total Throughput
                     </p>
-                    <p className="text-xs text-black-500 mt-1">
+                    <p className="text-xs text-gray-500 mt-1">
                       {aggregatedMetrics.throughput.actual.toLocaleString()}{" "}
                       /{" "}
                       {aggregatedMetrics.throughput.target.toLocaleString()}
@@ -734,10 +887,10 @@ export default function App() {
                       )}
                       %
                     </p>
-                    <p className="text-sm text-black-600">
+                    <p className="text-sm text-gray-600">
                       Total Labour Sales
                     </p>
-                    <p className="text-xs text-black-500 mt-1">
+                    <p className="text-xs text-gray-500 mt-1">
                       ₹{aggregatedMetrics.labour.actual.toLocaleString('en-IN')} / ₹{aggregatedMetrics.labour.target.toLocaleString('en-IN')}
                     </p>
                   </div>
@@ -748,10 +901,10 @@ export default function App() {
                       )}
                       %
                     </p>
-                    <p className="text-sm text-black-600">
+                    <p className="text-sm text-gray-600">
                       Total Parts Sales
                     </p>
-                    <p className="text-xs text-black-500 mt-1">
+                    <p className="text-xs text-gray-500 mt-1">
                       ₹{aggregatedMetrics.parts.actual.toLocaleString('en-IN')} / ₹{aggregatedMetrics.parts.target.toLocaleString('en-IN')}
                     </p>
                   </div>
@@ -759,10 +912,10 @@ export default function App() {
                     <p className="text-2xl font-bold text-orange-600">
                       {Object.keys(allLocationsData).length}
                     </p>
-                    <p className="text-sm text-black-600">
+                    <p className="text-sm text-gray-600">
                       Active Locations
                     </p>
-                    <p className="text-xs text-black-500 mt-1">
+                    <p className="text-xs text-gray-500 mt-1">
                       {Object.keys(allLocationsData).length}{" "}
                       with data
                     </p>
@@ -772,9 +925,9 @@ export default function App() {
             </Card>
 
             {/* Location Performance Speedometers */}
-            <Card className="border-black-200 shadow-sm">
+            <Card className="border-gray-200 shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center space-x-2 text-black-900">
+                <CardTitle className="flex items-center space-x-2 text-gray-900">
                   <PieChart className="h-5 w-5 text-blue-600" />
                   <span>
                     All Locations Performance Overview
@@ -784,7 +937,7 @@ export default function App() {
               <CardContent>
                 {/* Throughput Performance */}
                 <div className="mb-8">
-                  <h3 className="text-lg font-semibold text-black-800 mb-4">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">
                     Vehicle Throughput Achievement
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -810,7 +963,7 @@ export default function App() {
 
                 {/* Labour Performance */}
                 <div className="mb-8">
-                  <h3 className="text-lg font-semibold text-black-800 mb-4">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">
                     Labour Revenue Achievement
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -835,7 +988,7 @@ export default function App() {
 
                 {/* Parts Performance */}
                 <div>
-                  <h3 className="text-lg font-semibold text-black-800 mb-4">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">
                     Parts Sales Achievement
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -863,7 +1016,7 @@ export default function App() {
           <TabsContent value="dashboard" className="space-y-4">
             {/* Sub-navigation for detailed view */}
             <Tabs defaultValue="overview" className="space-y-4">
-              <TabsList className="sticky top-0 z-10 grid w-full grid-cols-5 bg-white border border-black-200 rounded-lg p-1 shadow-sm">
+              <TabsList className="sticky top-0 z-10 grid w-full grid-cols-5 bg-white border border-gray-200 rounded-lg p-1 shadow-sm">
                 <TabsTrigger
                   value="overview"
                   className="flex items-center space-x-1 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700"
@@ -928,9 +1081,9 @@ export default function App() {
               >
                 {/* Executive Summary */}
                 {allLocationData.length > 0 ? (
-                  <Card className="border-black-200 shadow-sm">
+                  <Card className="border-gray-200 shadow-sm">
                     <CardHeader className="pb-3">
-                      <CardTitle className="flex items-center justify-between text-black-900">
+                      <CardTitle className="flex items-center justify-between text-gray-900">
                         <div className="flex items-center space-x-2">
                           <TrendingUp className="h-5 w-5 text-blue-600" />
                           <span>Executive Summary</span>
@@ -969,10 +1122,10 @@ export default function App() {
                               )}
                               %
                             </p>
-                            <p className="text-sm text-black-600">
+                            <p className="text-sm text-gray-600">
                               Throughput Achievement
                             </p>
-                            <p className="text-xs text-black-500 mt-1">
+                            <p className="text-xs text-gray-500 mt-1">
                               {selectedLocation}
                             </p>
                           </div>
@@ -982,10 +1135,10 @@ export default function App() {
                             <p className="text-2xl font-bold text-blue-600">
                               {totalActualThroughput.toLocaleString()}
                             </p>
-                            <p className="text-sm text-black-600">
+                            <p className="text-sm text-gray-600">
                               Vehicles Processed
                             </p>
-                            <p className="text-xs text-black-500 mt-1">
+                            <p className="text-xs text-gray-500 mt-1">
                               {selectedLocation}
                             </p>
                           </div>
@@ -995,10 +1148,10 @@ export default function App() {
                             <p className="text-2xl font-bold text-green-600">
                               ₹{totalActualLabour.toLocaleString('en-IN')}
                             </p>
-                            <p className="text-sm text-black-600">
+                            <p className="text-sm text-gray-600">
                               Labour Revenue
                             </p>
-                            <p className="text-xs text-black-500 mt-1">
+                            <p className="text-xs text-gray-500 mt-1">
                               {selectedLocation}
                             </p>
                           </div>
@@ -1011,10 +1164,10 @@ export default function App() {
                               )}
                               %
                             </p>
-                            <p className="text-sm text-black-600">
+                            <p className="text-sm text-gray-600">
                               Labour Achievement
                             </p>
-                            <p className="text-xs text-black-500 mt-1">
+                            <p className="text-xs text-gray-500 mt-1">
                               {selectedLocation}
                             </p>
                           </div>
@@ -1023,13 +1176,13 @@ export default function App() {
                     </CardContent>
                   </Card>
                 ) : (
-                  <Card className="border-black-200 shadow-sm">
+                  <Card className="border-gray-200 shadow-sm">
                     <CardContent className="p-8 text-center">
-                      <TrendingUp className="h-12 w-12 text-black-400 mx-auto mb-4" />
-                      <h3 className="text-lg font-medium text-black-600 mb-2">
+                      <TrendingUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-600 mb-2">
                         No Data Available
                       </h3>
-                      <p className="text-black-500">
+                      <p className="text-gray-500">
                         Please upload CSV data for{" "}
                         {selectedLocation} to view executive
                         summary.
@@ -1081,7 +1234,7 @@ export default function App() {
                         trend="neutral"
                       />
                     )}
-                    {totalLabourMetrics.target > 0 && (
+                    {totalTargetLabour > 0 && (
                       <KPICard
                         title="Total Labour Sale"
                         actual={totalActualLabour}
@@ -1154,13 +1307,13 @@ export default function App() {
                     location={selectedLocation}
                   />
                 ) : (
-                  <Card className="border-black-200 shadow-sm">
+                  <Card className="border-gray-200 shadow-sm">
                     <CardContent className="p-8 text-center">
-                      <Car className="h-12 w-12 text-black-400 mx-auto mb-4" />
-                      <h3 className="text-lg font-medium text-black-600 mb-2">
+                      <Car className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-600 mb-2">
                         No Inflow Data Available
                       </h3>
-                      <p className="text-black-500">
+                      <p className="text-gray-500">
                         Please upload CSV data for{" "}
                         {selectedLocation} to view inflow
                         metrics.
@@ -1180,13 +1333,13 @@ export default function App() {
                     location={selectedLocation}
                   />
                 ) : (
-                  <Card className="border-black-200 shadow-sm">
+                  <Card className="border-gray-200 shadow-sm">
                     <CardContent className="p-8 text-center">
-                      <Wrench className="h-12 w-12 text-black-400 mx-auto mb-4" />
-                      <h3 className="text-lg font-medium text-black-600 mb-2">
+                      <Wrench className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-600 mb-2">
                         No Labour Data Available
                       </h3>
-                      <p className="text-black-500">
+                      <p className="text-gray-500">
                         Please upload CSV data for{" "}
                         {selectedLocation} to view labour
                         metrics.
@@ -1206,13 +1359,13 @@ export default function App() {
                     location={selectedLocation}
                   />
                 ) : (
-                  <Card className="border-black-200 shadow-sm">
+                  <Card className="border-gray-200 shadow-sm">
                     <CardContent className="p-8 text-center">
-                      <ShoppingCart className="h-12 w-12 text-black-400 mx-auto mb-4" />
-                      <h3 className="text-lg font-medium text-black-600 mb-2">
+                      <ShoppingCart className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-600 mb-2">
                         No Parts Data Available
                       </h3>
-                      <p className="text-black-500">
+                      <p className="text-gray-500">
                         Please upload CSV data for{" "}
                         {selectedLocation} to view parts
                         metrics.
@@ -1235,13 +1388,13 @@ export default function App() {
                     location={selectedLocation}
                   />
                 ) : (
-                  <Card className="border-black-200 shadow-sm">
+                  <Card className="border-gray-200 shadow-sm">
                     <CardContent className="p-8 text-center">
-                      <Cog className="h-12 w-12 text-black-400 mx-auto mb-4" />
-                      <h3 className="text-lg font-medium text-black-600 mb-2">
+                      <Cog className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-600 mb-2">
                         No Efficiency Data Available
                       </h3>
-                      <p className="text-black-500">
+                      <p className="text-gray-500">
                         Please upload CSV data for{" "}
                         {selectedLocation} to view efficiency
                         metrics.
