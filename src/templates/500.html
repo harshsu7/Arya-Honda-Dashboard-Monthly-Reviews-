@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Server Error - Arya Honda Dashboard{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+    <div class="max-w-md w-full text-center">
+        <div class="mb-8">
+            <i data-lucide="server" class="h-24 w-24 text-gray-400 mx-auto mb-4"></i>
+            <h1 class="text-4xl font-bold text-gray-900 mb-2">500</h1>
+            <h2 class="text-xl text-gray-600 mb-4">Server Error</h2>
+            <p class="text-gray-500 mb-8">
+                Something went wrong on our end. We're working to fix it.
+            </p>
+        </div>
+        
+        <div class="space-y-4">
+            <a href="{{ url_for('index') }}" class="btn btn-primary">
+                <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+                Try Again
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
